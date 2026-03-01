@@ -40,28 +40,24 @@ Running              →  idle 触发     →  Idle
 
 ### 解决
 
-在 `claw-tmux attach` 中管理 `monitor-activity` 的生命周期：
+**只有 Idle 状态才需要处理**（`.idle` flag 存在 = `monitor-activity on`）。Running 状态下 `monitor-activity` 是 off，人类操作不会触发任何东西。
 
 ```bash
 cmd_attach() {
   local session_id="${1:?Missing session-id}"
+  tmux has-session -t "$session_id" 2>/dev/null || die "Session not found"
   
-  # 进入前：禁用 activity 监控，防止人类操作误触
-  tmux set-option -w -t "$session_id" monitor-activity off 2>/dev/null
-  
-  # attach（阻塞，直到用户 Ctrl-b d detach）
-  tmux attach-session -t "$session_id"
-  
-  # detach 后：重新启用 activity 监控
-  tmux set-option -w -t "$session_id" monitor-activity on 2>/dev/null
+  if [[ -f "$CLAW_TMUX_HOME/${session_id}.idle" ]]; then
+    # Idle 状态：暂停 activity 监控，防止人类操作误触
+    tmux set-option -w -t "$session_id" monitor-activity off 2>/dev/null
+    tmux attach-session -t "$session_id"
+    # detach 后恢复
+    tmux set-option -w -t "$session_id" monitor-activity on 2>/dev/null
+  else
+    # Running 状态：直接 attach，无需处理
+    tmux attach-session -t "$session_id"
+  fi
 }
-```
-
-也可以用 tmux 的 `client-detached` hook 自动恢复：
-
-```bash
-tmux set-hook -t "$session_id" client-detached \
-  "set-option -w monitor-activity on"
 ```
 
 ## 实现步骤
@@ -111,21 +107,21 @@ if [[ "$event" == "idle" ]] && tmux has-session -t "$pty_id" 2>/dev/null; then
 fi
 ```
 
-### 4. 修改 `cmd_attach` — attach 时隔离 activity
+### 4. 修改 `cmd_attach` — Idle 状态下隔离 activity
 
 ```bash
 cmd_attach() {
   local session_id="${1:?Missing session-id}"
   tmux has-session -t "$session_id" 2>/dev/null || die "Session not found"
   
-  # Pause activity monitoring during human interaction
-  tmux set-option -w -t "$session_id" monitor-activity off 2>/dev/null
-  
-  tmux attach-session -t "$session_id"
-  
-  # Resume after detach (only if idle flag exists, meaning we're in Idle state)
   if [[ -f "$CLAW_TMUX_HOME/${session_id}.idle" ]]; then
+    # Idle 状态：暂停 activity 监控
+    tmux set-option -w -t "$session_id" monitor-activity off 2>/dev/null
+    tmux attach-session -t "$session_id"
+    # detach 后恢复
     tmux set-option -w -t "$session_id" monitor-activity on 2>/dev/null
+  else
+    tmux attach-session -t "$session_id"
   fi
 }
 ```
