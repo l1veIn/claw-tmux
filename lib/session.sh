@@ -5,7 +5,7 @@
 # cmd_new — create a new managed tmux session
 # ──────────────────────────────────────────────
 cmd_new() {
-  local agent_id="" claw_session="" tool="$CLAW_TMUX_DEFAULT_TOOL" custom_cmd=""
+  local agent_id="" claw_session="" chat_id="" tool="$CLAW_TMUX_DEFAULT_TOOL" custom_cmd=""
   local cwd="" cols="$CLAW_TMUX_COLS" rows="$CLAW_TMUX_ROWS" no_hooks=false
   local prompt=""
 
@@ -13,6 +13,7 @@ cmd_new() {
     case "$1" in
       -a|--agent)   agent_id="$2";      shift 2 ;;
       -s|--session) claw_session="$2";  shift 2 ;;
+      --chat-id)    chat_id="$2";       shift 2 ;;
       -t|--tool)    tool="$2";          shift 2 ;;
       --command)    custom_cmd="$2";    shift 2 ;;
       -c|--cwd)     cwd="$2";          shift 2 ;;
@@ -25,8 +26,24 @@ cmd_new() {
     esac
   done
 
-  [[ -z "$agent_id" ]]     && die "Missing required --agent <id>"
-  [[ -z "$claw_session" ]] && die "Missing required --session <id>"
+  [[ -z "$agent_id" ]] && die "Missing required --agent <id>"
+
+  # Resolve session ID: --session takes priority, otherwise use --chat-id
+  if [[ -z "$claw_session" ]]; then
+    [[ -z "$chat_id" ]] && die "Either --session or --chat-id is required"
+
+    local get_session_script="$SCRIPT_DIR/get-session.sh"
+    if [[ ! -x "$get_session_script" ]]; then
+      die "get-session.sh not found at $get_session_script"
+    fi
+
+    local session_json
+    session_json=$("$get_session_script" "$chat_id" "$agent_id" 2>/dev/null) \
+      || die "Failed to resolve session for chat_id=$chat_id agent=$agent_id"
+
+    claw_session=$(echo "$session_json" | jq -r '.sessionId // empty')
+    [[ -z "$claw_session" ]] && die "Could not resolve sessionId from chat_id=$chat_id"
+  fi
 
   # Build the command to run
   local tool_cmd
@@ -243,26 +260,24 @@ cmd_list() {
   local first=true
 
   if [[ "$json" != true ]]; then
-    printf "%-28s %-16s %-10s %-10s %-8s %s\n" "ID" "AGENT" "TOOL" "STATUS" "IDLE" "CWD"
-    printf "%-28s %-16s %-10s %-10s %-8s %s\n" "---" "---" "---" "---" "---" "---"
+    printf "%-28s %-16s %-10s %-10s %s\n" "ID" "AGENT" "TOOL" "STATUS" "CWD"
+    printf "%-28s %-16s %-10s %-10s %s\n" "---" "---" "---" "---" "---"
   fi
 
   while IFS= read -r pty_id; do
     [[ -z "$pty_id" ]] && continue
 
-    local agent tool cwd status idle_str
+    local agent tool cwd status
     agent=$(_state_get "$pty_id" "agent_id")
     tool=$(_state_get "$pty_id" "cli_tool")
     cwd=$(_state_get "$pty_id" "cwd")
 
-    # Determine status
+    # Determine status: alive or dead
     if tmux has-session -t "$pty_id" 2>/dev/null; then
-      # Check if last activity suggests idle
-      status="running"
+      status="alive"
     else
       status="dead"
     fi
-    idle_str="-"
 
     # Apply filters
     [[ -n "$filter_agent" && "$agent" != "$filter_agent" ]] && continue
@@ -275,11 +290,10 @@ cmd_list() {
         --arg agent "$agent" \
         --arg tool "$tool" \
         --arg status "$status" \
-        --arg idle "$idle_str" \
         --arg cwd "$cwd" \
-        '{id:$id, agent:$agent, tool:$tool, status:$status, idle:$idle, cwd:$cwd}')
+        '{id:$id, agent:$agent, tool:$tool, status:$status, cwd:$cwd}')
     else
-      printf "%-28s %-16s %-10s %-10s %-8s %s\n" "$pty_id" "$agent" "$tool" "$status" "$idle_str" "$cwd"
+      printf "%-28s %-16s %-10s %-10s %s\n" "$pty_id" "$agent" "$tool" "$status" "$cwd"
     fi
   done <<< "$ids"
 
@@ -450,7 +464,10 @@ Usage:
 
 Options:
   -a, --agent <id>      OpenClaw agent ID to bind (required)
-  -s, --session <id>    OpenClaw session ID for notification routing (required)
+      --chat-id <id>    Chat ID from inbound meta (e.g., "user:U0AFYM84RB9")
+                        Used to auto-resolve sessionId via get-session.sh
+  -s, --session <id>    OpenClaw session ID (UUID) for notification routing
+                        If omitted, uses --chat-id to auto-resolve
   -t, --tool <name>     CLI tool to launch: codex, claude, gemini (default: codex)
       --command <cmd>   Custom command instead of preset tool name
   -c, --cwd <path>      Working directory for the session
@@ -458,6 +475,11 @@ Options:
       --rows <n>        Terminal height (default: 50)
       --no-hooks        Don't register tmux hooks (manual monitoring)
   -h, --help            Show this help
+
+Session Resolution:
+  If --session is provided, use it directly.
+  Otherwise, use --chat-id + --agent to resolve via get-session.sh.
+  Either --session or --chat-id must be provided.
 EOF
 }
 
@@ -504,7 +526,7 @@ Usage:
 Options:
   -j, --json            Output as JSON array
   -a, --agent <id>      Filter by agent ID
-  -s, --status <s>      Filter by status: running, idle, dead
+  -s, --status <s>      Filter by status: alive, dead
   -h, --help            Show this help
 EOF
 }

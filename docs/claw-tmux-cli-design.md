@@ -28,7 +28,7 @@ Other:
   version     Print version
 
 Examples:
-  claw-tmux new --agent a1 --session sess-123 --tool codex "fix the login bug"
+  claw-tmux new --agent main --chat-id "user:U0AFYM84RB9" --tool codex "fix the login bug"
   claw-tmux write pty-001 "now add unit tests"
   claw-tmux read pty-001 --json
   claw-tmux list
@@ -58,7 +58,10 @@ Arguments:
 
 Options:
   -a, --agent <id>      OpenClaw agent ID to bind (required)
-  -s, --session <id>    OpenClaw session ID for notification routing (required)
+      --chat-id <id>    OpenClaw chat_id from inbound meta (e.g., "user:U0AFYM84RB9")
+                      Used to auto-resolve sessionId via get-session.sh
+  -s, --session <id>    OpenClaw session ID (UUID) for notification routing
+                      If omitted, uses --chat-id to auto-resolve
   -t, --tool <name>     CLI tool to launch: codex, claude, gemini (default: codex)
       --command <cmd>   Custom command instead of preset tool name
   -c, --cwd <path>      Working directory for the session
@@ -67,21 +70,31 @@ Options:
       --no-hooks        Don't register tmux hooks (manual monitoring)
   -h, --help            Show this help
 
+Session Resolution:
+  If --session is provided, use it directly.
+  Otherwise, use --chat-id to resolve sessionId via:
+    ~/.agents/skills/get-session/lib/get-session.sh <chat_id> <agent_id>
+
+  Either --session or --chat-id must be provided.
+
 Returns:
   Session ID (e.g., pty-001) printed to stdout.
 
 Examples:
-  # Basic: start codex with a prompt
-  claw-tmux new --agent agent-fe --session sess-123 --tool codex "fix auth.ts login bug"
+  # Recommended: use --chat-id (agent provides chat_id from inbound meta)
+  claw-tmux new --agent main --chat-id "user:U0AFYM84RB9" --tool codex "fix auth.ts login bug"
+
+  # Alternative: directly specify session ID
+  claw-tmux new --agent main --session "e08484d6-7310-4957-9d21-156f87d352ed" --tool codex "fix bug"
 
   # Claude Code in a specific directory
-  claw-tmux new -a agent-be -s sess-456 -t claude -c /path/to/project "refactor the API layer"
+  claw-tmux new -a main --chat-id "user:U0AFYM84RB9" -t claude -c /path/to/project "refactor"
 
   # Custom command
-  claw-tmux new -a agent-ops -s sess-789 --command "aider --model gpt-4" "add logging"
+  claw-tmux new -a main --chat-id "user:U0AFYM84RB9" --command "aider --model gpt-4" "add logging"
 
   # No initial prompt (just launch the tool)
-  claw-tmux new -a agent-fe -t codex
+  claw-tmux new -a main --chat-id "user:U0AFYM84RB9" -t codex
 ```
 
 ---
@@ -181,19 +194,19 @@ Usage:
 Options:
   -j, --json            Output as JSON array
   -a, --agent <id>      Filter by agent ID
-  -s, --status <s>      Filter by status: running, idle, dead
+  -s, --status <s>      Filter by status: alive, dead
   -h, --help            Show this help
 
 Table output:
-  ID            AGENT           TOOL     STATUS    IDLE     CWD
-  pty-001       agent-fe        codex    idle      12s      /app/src
-  pty-002       agent-be        claude   running   -        /api
-  pty-003       agent-ops       gemini   dead      -        /infra
+  ID            AGENT           TOOL     STATUS    CWD
+  pty-001       main            codex    alive     /app/src
+  pty-002       main            claude   alive     /api
+  pty-003       main            gemini   dead      /infra
 
 Examples:
   claw-tmux list
-  claw-tmux list --agent agent-fe
-  claw-tmux list --status idle --json
+  claw-tmux list --agent main
+  claw-tmux list --status dead --json
 ```
 
 ---
@@ -238,7 +251,7 @@ Options:
 
 Examples:
   claw-tmux kill pty-001
-  claw-tmux kill --agent agent-fe
+  claw-tmux kill --agent main
   claw-tmux kill all -f
 ```
 
@@ -256,4 +269,38 @@ CLAW_TMUX_DEFAULT_TOOL=codex
 # Terminal size
 CLAW_TMUX_COLS=200
 CLAW_TMUX_ROWS=50
+```
+
+---
+
+## Session ID 自动解析
+
+claw-tmux 使用 `get-session.sh` 脚本自动解析 OpenClaw session ID：
+
+**脚本路径**: `~/.agents/skills/get-session/lib/get-session.sh`
+
+**用法**:
+```bash
+get-session.sh <chat_id> <agent_id>
+```
+
+**示例**:
+```bash
+# 输入
+get-session.sh "user:U0AFYM84RB9" "main"
+
+# 输出
+{"key":"agent:main:main","sessionId":"e08484d6-7310-4957-9d21-156f87d352ed","agentId":"main"}
+```
+
+**匹配逻辑**:
+1. 调用 `openclaw sessions --agent <agent_id> --json`
+2. 对于 DM: key 固定为 `agent:<agentId>:main`
+3. 对于 Group: key 包含 channel 信息，通过 `deliveryContext.to` 匹配
+
+**Agent 调用示例**:
+```bash
+# Agent 从 Runtime 获取 agentId，从 Inbound Meta 获取 chat_id
+# 直接传给 claw-tmux，无需自己解析 sessionId
+claw-tmux new --agent main --chat-id "user:U0AFYM84RB9" --tool codex "fix the bug"
 ```

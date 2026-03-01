@@ -260,3 +260,63 @@ sequenceDiagram
 3. 发送输出: `tmux send-keys "echo hello" Enter` → 等 3s → 检查 `/tmp/test.log` 有 idle
 4. 测试 pane-exited: `tmux send-keys "exit" Enter` → 检查 hook 触发
 5. 完整闭环: `claw-tmux new` → 等通知 → `claw-tmux read` → `claw-tmux write` → 等通知
+
+---
+
+## Session ID 解析（2026-03-01 新增）
+
+### 两种传入方式
+
+| 参数 | 说明 | 优先级 |
+|------|------|--------|
+| `--session <uuid>` | 直接传入 OpenClaw session ID (UUID) | 高 |
+| `--chat-id <id>` | 传入 chat_id，自动解析 sessionId | 低 |
+
+**推荐使用 `--chat-id`**，agent 只需从 Inbound Meta 获取 `chat_id`，无需自己调用 sessions_list。
+
+### 自动解析脚本
+
+**路径**: `~/.agents/skills/get-session/lib/get-session.sh`
+
+**原理**:
+1. 调用 `openclaw sessions --agent <agent_id> --json`
+2. 根据 chat_id 类型匹配:
+   - DM: key 固定为 `agent:<agentId>:main`
+   - Group: key 包含 channel 信息
+3. 返回 sessionId (UUID)
+
+**示例**:
+```bash
+# 输入
+get-session.sh "user:U0AFYM84RB9" "main"
+
+# 输出
+{"key":"agent:main:main","sessionId":"e08484d6-7310-4957-9d21-156f87d352ed","agentId":"main"}
+```
+
+### Agent 调用示例
+
+```bash
+# Agent 从 Runtime 获取 agentId，从 Inbound Meta 获取 chat_id
+# claw-tmux 内部调用 get-session.sh 解析 sessionId
+
+claw-tmux new \
+  --agent main \
+  --chat-id "user:U0AFYM84RB9" \
+  --tool codex \
+  "fix the login bug"
+```
+
+### 数据来源
+
+| 信息 | 来源 | 示例 |
+|------|------|------|
+| `agentId` | Runtime 环境变量 | `main` |
+| `chat_id` | Inbound Meta | `user:U0AFYM84RB9` |
+| `sessionId` | get-session.sh 解析 | `e08484d6-...` |
+
+### 优势
+
+1. **减少工具调用**: agent 不需要先调用 sessions_list
+2. **避免幻觉**: 通过精确匹配 `chat_id` 定位 session
+3. **多 agent 安全**: 每个 agent 只有自己的 sessions
