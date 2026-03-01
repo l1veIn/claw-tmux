@@ -32,7 +32,7 @@ cmd_new() {
   if [[ -z "$claw_session" ]]; then
     [[ -z "$chat_id" ]] && die "Either --session or --chat-id is required"
 
-    local get_session_script="$SCRIPT_DIR/get-session.sh"
+    local get_session_script="$SCRIPT_DIR/lib/get-session.sh"
     if [[ ! -x "$get_session_script" ]]; then
       die "get-session.sh not found at $get_session_script"
     fi
