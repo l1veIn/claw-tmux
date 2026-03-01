@@ -141,6 +141,61 @@ write 发送文本 → pane 有输出 → alert-activity 自动触发 → reacti
 -  rm -f "$CLAW_TMUX_HOME/${session_id}.idle"
 ```
 
+## 限流：指数退避
+
+防止状态机抖动时高频推送。连续 idle 时倍增 `monitor-silence` 值，`alert-activity` 重置。
+
+### 行为
+
+| 连续第几次 idle | monitor-silence | 累计等待 |
+|---------------|-----------------|---------|
+| 1 | 30s | 30s |
+| 2 | 60s | 1.5min |
+| 3 | 120s | 3.5min |
+| 4 | 240s | 7.5min |
+| 5+ | 300s（封顶） | … |
+
+### 实现
+
+用 `.idle` flag 文件记录当前退避级别（替换原来的空文件）：
+
+**notify.sh**（idle 时写入退避级别）：
+
+```bash
+idle_flag="$CLAW_TMUX_HOME/${pty_id}.idle"
+CLAW_TMUX_IDLE_MAX=300  # 封顶 5 分钟
+
+# 读取当前退避级别
+if [[ -f "$idle_flag" ]]; then
+  level=$(cat "$idle_flag" 2>/dev/null || echo 0)
+else
+  level=0
+fi
+level=$((level + 1))
+echo "$level" > "$idle_flag"
+
+# 计算下一次 silence 阈值（指数退避）
+next_silence=$((CLAW_TMUX_IDLE_SEC * (2 ** (level - 1))))
+(( next_silence > CLAW_TMUX_IDLE_MAX )) && next_silence=$CLAW_TMUX_IDLE_MAX
+```
+
+**reactivate.sh**（activity 时重置）：
+
+```bash
+# 清除 idle flag（重置退避级别）
+rm -f "$CLAW_TMUX_HOME/${pty_id}.idle"
+
+# 恢复默认 silence 阈值
+tmux set-option -w -t "$pty_id" monitor-silence "$CLAW_TMUX_IDLE_SEC" 2>/dev/null || true
+```
+
+### 关键点
+
+- **正常流程不受影响**：工具完成 → idle(30s) → 通知 → write/activity → 重置为 30s
+- **抖动自动降频**：快速 idle↔activity 切换时，silence 阈值 30→60→120→240→300s
+- **无额外文件**：复用 `.idle` flag，从空文件升级为记录退避级别
+- `write` 发送文本后 activity 触发 reactivate.sh，退避级别自动归零
+
 ## 状态机总结
 
 ```
@@ -158,10 +213,11 @@ write 发送文本 → pane 有输出 → alert-activity 自动触发 → reacti
                     │                              │
                     │    pane 有新输出              │
                     │    (alert-activity)           │
+                    │    重置退避级别               │
                     └──────────────────────────────┘
                     
+                    idle 通知后 silence 阈值指数退避
+                    activity 触发后重置为默认值
                     attach 时暂停 activity
-                    detach 后恢复 activity
-                    write 直接跳回 Running
                     kill / exit 退出循环
 ```
