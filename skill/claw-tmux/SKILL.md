@@ -1,6 +1,10 @@
 ---
 name: claw-tmux
-description: Manage CLI AI tools (Codex, Claude Code, Gemini) via tmux sessions with automatic idle detection and OpenClaw agent notification. Use when: (1) Running long coding tasks that need monitoring, (2) Multi-round iterative development with codex/claude, (3) Background task execution with completion notifications, (4) Need to inspect or interact with running AI tool sessions.
+description: Manage CLI AI tools (Codex, Claude Code, Gemini) via tmux sessions with automatic idle detection and OpenClaw agent notification. Use when (1) Running long coding tasks that need monitoring, (2) Multi-round iterative development with codex/claude, (3) Background task execution with completion notifications, (4) Need to inspect or interact with running AI tool sessions.
+metadata:
+  {
+    "openclaw": { "emoji": "🖥️" }
+  }
 ---
 
 # claw-tmux

@@ -134,6 +134,11 @@ cmd_write() {
   # Verify session exists
   tmux has-session -t "$session_id" 2>/dev/null || die "Session '$session_id' not found"
 
+  # Re-enable monitor-silence (may have been disabled by idle notification)
+  # Also clear the idle dedup flag so next idle can trigger
+  tmux set-option -w -t "$session_id" monitor-silence "$CLAW_TMUX_IDLE_SEC" 2>/dev/null || true
+  rm -f "$CLAW_TMUX_HOME/${session_id}.idle"
+
   # Send tmux key names directly (e.g., C-c, Escape)
   if [[ -n "$keys" ]]; then
     tmux send-keys -t "$session_id" "$keys"
@@ -153,10 +158,12 @@ cmd_write() {
       tmux send-keys -t "$session_id" -l "${text:$i:1}"
       sleep "$(echo "scale=3; $delay/1000" | bc)"
     done
-    [[ "$raw" == false ]] && tmux send-keys -t "$session_id" Enter
+    [[ "$raw" == false ]] && sleep 0.3 && tmux send-keys -t "$session_id" Enter
   else
-    tmux send-keys -t "$session_id" -l "$text"
-    [[ "$raw" == false ]] && tmux send-keys -t "$session_id" Enter
+    # Use tmux paste buffer for reliable text input to TUI apps
+    tmux set-buffer -b claw-input "$text"
+    tmux paste-buffer -b claw-input -t "$session_id" -d
+    [[ "$raw" == false ]] && sleep 0.3 && tmux send-keys -t "$session_id" Enter
   fi
 }
 
@@ -375,8 +382,9 @@ _kill_one() {
   # Kill tmux session FIRST (fast, synchronous)
   tmux kill-session -t "$id" 2>/dev/null || true
 
-  # Remove from state.json
+  # Remove from state.json and clean up idle flag
   _state_remove "$id"
+  rm -f "$CLAW_TMUX_HOME/${id}.idle"
 
   # Send notification in background (don't block kill)
   local notify_script="$SCRIPT_DIR/lib/notify.sh"
