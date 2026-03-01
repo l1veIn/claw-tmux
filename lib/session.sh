@@ -53,7 +53,7 @@ cmd_new() {
     case "$tool" in
       codex)   tool_cmd="codex --full-auto" ;;
       claude)  tool_cmd="claude --dangerously-skip-permissions" ;;
-      gemini)  tool_cmd="gemini" ;;
+      gemini)  tool_cmd="gemini --approval-mode=yolo" ;;
       *)       tool_cmd="$tool" ;;
     esac
   fi
@@ -372,17 +372,18 @@ _kill_one() {
     [[ "$answer" != "y" && "$answer" != "Y" ]] && return 0
   fi
 
-  # Send notification before killing
-  local notify_script="$SCRIPT_DIR/lib/notify.sh"
-  if [[ -x "$notify_script" ]]; then
-    "$notify_script" "$id" "exited" 2>/dev/null || true
-  fi
-
-  # Kill tmux session
+  # Kill tmux session FIRST (fast, synchronous)
   tmux kill-session -t "$id" 2>/dev/null || true
 
   # Remove from state.json
   _state_remove "$id"
+
+  # Send notification in background (don't block kill)
+  local notify_script="$SCRIPT_DIR/lib/notify.sh"
+  if [[ -x "$notify_script" ]]; then
+    "$notify_script" "$id" "exited" &>/dev/null &
+  fi
+
   echo "Killed: $id"
 }
 
@@ -396,20 +397,23 @@ _ensure_state() {
 
 # Cross-platform file locking using mkdir (atomic on all POSIX systems)
 _lock() {
-  local retries=50
+  local retries=30
   while ! mkdir "$LOCK_FILE" 2>/dev/null; do
     retries=$((retries - 1))
     if [[ $retries -le 0 ]]; then
-      die "Failed to acquire lock after 5s"
+      # Force remove stale lock (e.g., from a crashed process)
+      rmdir "$LOCK_FILE" 2>/dev/null || true
+      mkdir "$LOCK_FILE" 2>/dev/null || die "Failed to acquire lock"
+      break
     fi
     sleep 0.1
   done
-  # Ensure lock is released on exit
   trap '_unlock' EXIT
 }
 
 _unlock() {
   rmdir "$LOCK_FILE" 2>/dev/null || true
+  trap - EXIT
 }
 
 _state_write() {

@@ -17,15 +17,10 @@ CLI AI session manager for Claw agents. Manage CLI AI tools (Codex, Claude Code,
 ## Install
 
 ```bash
-# Clone the repository
-git clone <repo-url> ~/claw-tmux
-
-# Add to PATH
-export PATH="$HOME/claw-tmux:$PATH"
-
-# Or create a symlink
-ln -s ~/claw-tmux/claw-tmux /usr/local/bin/claw-tmux
+curl -fsSL https://raw.githubusercontent.com/l1veIn/claw-tmux/main/install.sh | bash
 ```
+
+Re-run to update.
 
 ## Quick Start
 
