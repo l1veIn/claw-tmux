@@ -126,9 +126,20 @@ cmd_attach() {
 }
 ```
 
-### 5. `cmd_write` 保持不变
+### 5. 简化 `cmd_write` — 移除监控逻辑
 
-`write` 仍然手动重新启用 `monitor-silence` + 清除 flag，作为显式触发路径。与 activity 自动路径共存，互不冲突。
+`write` 不再管监控状态，只负责发送文本。状态切换完全托管给 hooks：
+
+```
+write 发送文本 → pane 有输出 → alert-activity 自动触发 → reactivate.sh 恢复监控
+```
+
+移除 `cmd_write` 中的以下代码：
+
+```diff
+-  tmux set-option -w -t "$session_id" monitor-silence "$CLAW_TMUX_IDLE_SEC" 2>/dev/null || true
+-  rm -f "$CLAW_TMUX_HOME/${session_id}.idle"
+```
 
 ## 状态机总结
 
