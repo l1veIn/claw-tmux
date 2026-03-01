@@ -1,0 +1,12 @@
+# Runtime state
+.claw-tmux/
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# claw-tmux — CLI AI session manager for Claw agents
+# Manage CLI AI tools (Codex, Claude Code, Gemini, etc.) via tmux sessions,
+# with automatic idle detection and OpenClaw agent notification.
+
+set -euo pipefail
+
+VERSION="0.1.0"
+
+# ── Resolve script directory (follow symlinks) ──
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
+
+# ── Runtime paths ──
+CLAW_TMUX_HOME="${CLAW_TMUX_HOME:-$HOME/.claw-tmux}"
+STATE_FILE="$CLAW_TMUX_HOME/state.json"
+LOCK_FILE="$CLAW_TMUX_HOME/state.lock"
+
+# ── Load configuration ──
+# Priority: env vars > user config > default config
+
+# Load defaults first
+# shellcheck source=config/default.conf
+[[ -f "$SCRIPT_DIR/config/default.conf" ]] && source "$SCRIPT_DIR/config/default.conf"
+
+# Override with user config
+[[ -f "$CLAW_TMUX_HOME/config" ]] && source "$CLAW_TMUX_HOME/config"
+
+# Environment variables take highest priority (already set if present)
+CLAW_TMUX_IDLE_SEC="${CLAW_TMUX_IDLE_SEC:-5}"
+CLAW_TMUX_DEFAULT_TOOL="${CLAW_TMUX_DEFAULT_TOOL:-codex}"
+CLAW_TMUX_COLS="${CLAW_TMUX_COLS:-200}"
+CLAW_TMUX_ROWS="${CLAW_TMUX_ROWS:-50}"
+
+# ── Helpers ──
+
+die() {
+  echo "claw-tmux: error: $*" >&2
+  exit 1
+}
+
+# ── Preflight checks ──
+
+check_deps() {
+  # tmux must be installed
+  command -v tmux >/dev/null 2>&1 || die "tmux is not installed. Please install tmux 3.2+."
+
+  # Check tmux version >= 3.2 (for silence-action support)
+  local ver
+  ver=$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -1)
+  local major minor
+  major=$(echo "$ver" | cut -d. -f1)
+  minor=$(echo "$ver" | cut -d. -f2)
+
+  if [[ "$major" -lt 3 ]] || { [[ "$major" -eq 3 ]] && [[ "$minor" -lt 2 ]]; }; then
+    die "tmux $ver found, but 3.2+ is required (for silence-action support)."
+  fi
+
+  # jq must be installed
+  command -v jq >/dev/null 2>&1 || die "jq is not installed. Please install jq."
+}
+
+init_runtime() {
+  mkdir -p "$CLAW_TMUX_HOME"
+
+  # Initialize state.json if missing
+  if [[ ! -f "$STATE_FILE" ]]; then
+    echo '{"sessions":{}}' > "$STATE_FILE"
+  fi
+
+  # Ensure notify.sh is executable
+  local notify="$SCRIPT_DIR/lib/notify.sh"
+  [[ -f "$notify" ]] && chmod +x "$notify"
+}
+
+# ── Help ──
+
+show_help() {
+  cat <<'EOF'
+claw-tmux — CLI AI session manager for Claw agents.
+
+Manage CLI AI tools (Codex, Claude Code, Gemini, etc.) like tmux sessions,
+with automatic idle detection and OpenClaw agent notification.
+
+Usage:
+  claw-tmux <command> [options]
+
+Session Commands:
+  new         Create a new CLI AI session
+  write       Send input to a session
+  read        Capture output from a session
+  attach      Attach to a session interactively (like tmux attach)
+  list        List all managed sessions
+  kill        Terminate a session
+
+Other:
+  help        Show help for a command
+  version     Print version
+
+Examples:
+  claw-tmux new --agent a1 --session sess-123 --tool codex "fix the login bug"
+  claw-tmux write pty-001 "now add unit tests"
+  claw-tmux read pty-001 --json
+  claw-tmux list
+
+Environment:
+  CLAW_TMUX_HOME       State directory (default: ~/.claw-tmux)
+  CLAW_TMUX_IDLE_SEC   Idle threshold in seconds (default: 5)
+  TMUX                 Detected automatically; tmux must be installed
+EOF
+}
+
+# ── Load session functions ──
+# shellcheck source=lib/session.sh
+source "$SCRIPT_DIR/lib/session.sh"
+
+# ── Main dispatcher ──
+
+main() {
+  check_deps
+  init_runtime
+
+  local cmd="${1:-help}"
+  shift 2>/dev/null || true
+
+  case "$cmd" in
+    new)      cmd_new "$@" ;;
+    write)    cmd_write "$@" ;;
+    read)     cmd_read "$@" ;;
+    attach)   cmd_attach "$@" ;;
+    list|ls)  cmd_list "$@" ;;
+    kill)     cmd_kill "$@" ;;
+    version|--version|-V)
+      echo "claw-tmux $VERSION"
+      ;;
+    help|--help|-h)
+      if [[ $# -gt 0 ]]; then
+        case "$1" in
+          new)    _help_new ;;
+          write)  _help_write ;;
+          read)   _help_read ;;
+          list)   _help_list ;;
+          kill)   _help_kill ;;
+          *)      show_help ;;
+        esac
+      else
+        show_help
+      fi
+      ;;
+    *)
+      die "Unknown command: $cmd. Run 'claw-tmux help' for usage."
+      ;;
+  esac
+}
+
+main "$@"
