@@ -19,6 +19,15 @@ command -v git >/dev/null 2>&1 || { error "git is required"; exit 1; }
 command -v tmux >/dev/null 2>&1 || { error "tmux is required (3.2+)"; exit 1; }
 command -v jq >/dev/null 2>&1 || { error "jq is required"; exit 1; }
 
+# Check tmux version >= 3.2
+tmux_ver=$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -1)
+tmux_major=$(echo "$tmux_ver" | cut -d. -f1)
+tmux_minor=$(echo "$tmux_ver" | cut -d. -f2)
+if [[ "$tmux_major" -lt 3 ]] || { [[ "$tmux_major" -eq 3 ]] && [[ "$tmux_minor" -lt 2 ]]; }; then
+  error "tmux $tmux_ver found, but 3.2+ is required (for silence-action support)"
+  exit 1
+fi
+
 # ── Install or Update ──
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then

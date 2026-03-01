@@ -115,11 +115,7 @@ claw-tmux kill all -f
 tmux list-sessions
 ```
 
-## Related Files
+## Runtime Files
 
-- Main script: `/usr/local/bin/claw-tmux` (symlink)
-- Session logic: `lib/session.sh`
-- Notification script: `lib/notify.sh`
-- Session ID resolver: `lib/get-session.sh`
-- State file: `~/.claw-tmux/state.json`
-- Notification log: `~/.claw-tmux/notify.log`
+- `~/.claw-tmux/state.json` — session bindings
+- `~/.claw-tmux/notify.log` — notification log
