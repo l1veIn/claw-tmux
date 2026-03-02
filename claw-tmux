@@ -129,6 +129,7 @@ main() {
     attach)   cmd_attach "$@" ;;
     list|ls)  cmd_list "$@" ;;
     kill)     cmd_kill "$@" ;;
+    clean)    cmd_clean "$@" ;;
     version|--version|-V)
       echo "claw-tmux $VERSION"
       ;;

@@ -274,21 +274,21 @@ cmd_list() {
   while IFS= read -r pty_id; do
     [[ -z "$pty_id" ]] && continue
 
-    local agent tool cwd status
+    # Auto-clean dead sessions
+    if ! tmux has-session -t "$pty_id" 2>/dev/null; then
+      _state_remove "$pty_id"
+      rm -f "$CLAW_TMUX_HOME/${pty_id}.idle"
+      continue
+    fi
+
+    local agent tool cwd
     agent=$(_state_get "$pty_id" "agent_id")
     tool=$(_state_get "$pty_id" "cli_tool")
     cwd=$(_state_get "$pty_id" "cwd")
 
-    # Determine status: alive or dead
-    if tmux has-session -t "$pty_id" 2>/dev/null; then
-      status="alive"
-    else
-      status="dead"
-    fi
-
     # Apply filters
     [[ -n "$filter_agent" && "$agent" != "$filter_agent" ]] && continue
-    [[ -n "$filter_status" && "$status" != "$filter_status" ]] && continue
+    [[ -n "$filter_status" && "$filter_status" != "alive" ]] && continue
 
     if [[ "$json" == true ]]; then
       [[ "$first" == true ]] && first=false || json_arr+=","
@@ -296,11 +296,11 @@ cmd_list() {
         --arg id "$pty_id" \
         --arg agent "$agent" \
         --arg tool "$tool" \
-        --arg status "$status" \
+        --arg status "alive" \
         --arg cwd "$cwd" \
         '{id:$id, agent:$agent, tool:$tool, status:$status, cwd:$cwd}')
     else
-      printf "%-28s %-16s %-10s %-10s %s\n" "$pty_id" "$agent" "$tool" "$status" "$cwd"
+      printf "%-28s %-16s %-10s %-10s %s\n" "$pty_id" "$agent" "$tool" "alive" "$cwd"
     fi
   done <<< "$ids"
 
@@ -354,6 +354,32 @@ cmd_kill() {
   else
     _kill_one "$session_id" "$force"
   fi
+}
+
+# ──────────────────────────────────────────────
+# cmd_clean — remove dead sessions from state.json
+# ──────────────────────────────────────────────
+cmd_clean() {
+  _ensure_state
+
+  local ids cleaned=0
+  ids=$(jq -r '.sessions | keys[]' "$STATE_FILE" 2>/dev/null)
+
+  if [[ -z "$ids" ]]; then
+    echo "No managed sessions."
+    return 0
+  fi
+
+  while IFS= read -r pty_id; do
+    [[ -z "$pty_id" ]] && continue
+    if ! tmux has-session -t "$pty_id" 2>/dev/null; then
+      _state_remove "$pty_id"
+      rm -f "$CLAW_TMUX_HOME/${pty_id}.idle"
+      cleaned=$((cleaned + 1))
+    fi
+  done <<< "$ids"
+
+  echo "Cleaned $cleaned dead session(s)."
 }
 
 # ──────────────────────────────────────────────
