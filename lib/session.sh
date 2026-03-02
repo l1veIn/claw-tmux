@@ -28,6 +28,24 @@ cmd_new() {
 
   [[ -z "$agent_id" ]] && die "Missing required --agent <id>"
 
+  # Cooldown: prevent duplicate session creation from repeated messages
+  local cooldown_file="$CLAW_TMUX_HOME/new.cooldown"
+  local cooldown_sec="${CLAW_TMUX_NEW_COOLDOWN:-5}"
+
+  if [[ -f "$cooldown_file" ]]; then
+    local last_ts last_pty
+    last_ts=$(awk '{print $1}' "$cooldown_file")
+    last_pty=$(awk '{print $2}' "$cooldown_file")
+    local now_ts
+    now_ts=$(date +%s)
+
+    if [[ -n "$last_ts" && -n "$last_pty" ]] && (( now_ts - last_ts < cooldown_sec )); then
+      # Within cooldown, return existing session
+      echo "$last_pty"
+      return 0
+    fi
+  fi
+
   # Resolve session ID: --session takes priority, otherwise use --chat-id
   if [[ -z "$claw_session" ]]; then
     [[ -z "$chat_id" ]] && die "Either --session or --chat-id is required"
@@ -109,6 +127,9 @@ cmd_new() {
   local real_cwd="${cwd:-$(pwd)}"
 
   _state_write "$pty_id" "$agent_id" "$claw_session" "$tool" "$tool_cmd" "$now" "$real_cwd"
+
+  # Write cooldown marker
+  echo "$(date +%s) $pty_id" > "$cooldown_file"
 
   # Output the session ID
   echo "$pty_id"
