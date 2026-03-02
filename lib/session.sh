@@ -80,14 +80,23 @@ cmd_new() {
   # Register hooks (unless --no-hooks)
   if [[ "$no_hooks" == false ]]; then
     local notify_script="$SCRIPT_DIR/lib/notify.sh"
+    local reactivate_script="$SCRIPT_DIR/lib/reactivate.sh"
 
-    # Enable silence monitoring
+    # Enable silence monitoring (Running state)
     tmux set-option -w -t "$pty_id" monitor-silence "$CLAW_TMUX_IDLE_SEC"
     tmux set-option -t "$pty_id" silence-action any
 
-    # Hook: silence detected
+    # Activity monitoring starts OFF, enabled by notify.sh on idle
+    tmux set-option -w -t "$pty_id" monitor-activity off
+    tmux set-option -t "$pty_id" activity-action any
+
+    # Hook: silence detected → Idle state
     tmux set-hook -t "$pty_id" alert-silence \
       "run-shell '\"$notify_script\" \"$pty_id\" idle'"
+
+    # Hook: activity detected → Running state
+    tmux set-hook -t "$pty_id" alert-activity \
+      "run-shell '\"$reactivate_script\" \"$pty_id\"'"
 
     # Hook: process exited
     tmux set-hook -t "$pty_id" pane-exited \
@@ -133,11 +142,6 @@ cmd_write() {
 
   # Verify session exists
   tmux has-session -t "$session_id" 2>/dev/null || die "Session '$session_id' not found"
-
-  # Re-enable monitor-silence (may have been disabled by idle notification)
-  # Also clear the idle dedup flag so next idle can trigger
-  tmux set-option -w -t "$session_id" monitor-silence "$CLAW_TMUX_IDLE_SEC" 2>/dev/null || true
-  rm -f "$CLAW_TMUX_HOME/${session_id}.idle"
 
   # Send tmux key names directly (e.g., C-c, Escape)
   if [[ -n "$keys" ]]; then
@@ -389,7 +393,17 @@ cmd_attach() {
   local session_id="${1:?Missing session-id}"
 
   tmux has-session -t "$session_id" 2>/dev/null || die "Session '$session_id' not found"
-  tmux attach-session -t "$session_id"
+
+  if [[ -f "$CLAW_TMUX_HOME/${session_id}.idle" ]]; then
+    # Idle state: pause activity monitoring to prevent human interaction from triggering
+    tmux set-option -w -t "$session_id" monitor-activity off 2>/dev/null
+    tmux attach-session -t "$session_id"
+    # Restore after detach
+    tmux set-option -w -t "$session_id" monitor-activity on 2>/dev/null
+  else
+    # Running state: no special handling needed
+    tmux attach-session -t "$session_id"
+  fi
 }
 
 # ══════════════════════════════════════════════

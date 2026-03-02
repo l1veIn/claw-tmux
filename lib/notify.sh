@@ -46,22 +46,32 @@ if [[ -z "$session_id" || -z "$agent_id" ]]; then
   exit 1
 fi
 
-# Deduplicate idle notifications using a flag file.
-# Multiple hook invocations can race before monitor-silence is disabled.
-# The flag is cleared by `claw-tmux write` when re-enabling monitoring.
+# Deduplicate idle notifications and implement exponential backoff.
+# The flag file stores the backoff level (1, 2, 3...).
+# Cleared by reactivate.sh (alert-activity) when pane becomes active again.
+CLAW_TMUX_IDLE_MAX="${CLAW_TMUX_IDLE_MAX:-300}"
+
 if [[ "$event" == "idle" ]]; then
   idle_flag="$CLAW_TMUX_HOME/${pty_id}.idle"
+
+  # Read current backoff level
   if [[ -f "$idle_flag" ]]; then
-    # Already notified for this idle period, skip
-    exit 0
+    level=$(cat "$idle_flag" 2>/dev/null || echo 0)
+    if [[ "$level" -gt 0 ]]; then
+      # Already notified for this idle period, skip
+      exit 0
+    fi
   fi
-  touch "$idle_flag"
+  level=1
+  echo "$level" > "$idle_flag"
 fi
 
-# Disable monitor-silence to prevent further triggers.
-# It will be re-enabled by `claw-tmux write`.
+# State transition: Running → Idle
 if [[ "$event" == "idle" ]] && tmux has-session -t "$pty_id" 2>/dev/null; then
+  # Disable silence monitoring
   tmux set-option -w -t "$pty_id" monitor-silence 0 2>/dev/null || true
+  # Enable activity monitoring (triggers reactivate.sh when pane has output)
+  tmux set-option -w -t "$pty_id" monitor-activity on 2>/dev/null || true
 fi
 
 # Capture last 20 lines as preview (more context for agent to understand status)
