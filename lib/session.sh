@@ -64,17 +64,24 @@ cmd_new() {
   fi
 
   # Build the command to run
-  local tool_cmd
+  local tool_cmd tool_bin
   if [[ -n "$custom_cmd" ]]; then
     tool_cmd="$custom_cmd"
+    tool_bin="${custom_cmd%% *}"
   else
     case "$tool" in
-      codex)   tool_cmd="codex --full-auto" ;;
-      claude)  tool_cmd="claude --dangerously-skip-permissions" ;;
-      gemini)  tool_cmd="gemini --approval-mode=yolo" ;;
-      *)       tool_cmd="$tool" ;;
+      codex)   tool_cmd="codex --full-auto" ;            tool_bin="codex" ;;
+      claude)  tool_cmd="claude --dangerously-skip-permissions" ; tool_bin="claude" ;;
+      gemini)  tool_cmd="gemini --approval-mode=yolo" ;  tool_bin="gemini" ;;
+      *)       tool_cmd="$tool" ;                        tool_bin="$tool" ;;
     esac
   fi
+
+  # Validate tool binary exists
+  command -v "$tool_bin" >/dev/null 2>&1 || die "Tool '$tool_bin' not found in PATH"
+
+  # Validate working directory
+  [[ -n "$cwd" && ! -d "$cwd" ]] && die "Working directory '$cwd' does not exist"
 
   # Generate unique session ID
   local pty_id="pty-$(date +%s)-$$"
